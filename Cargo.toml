@@ -1,0 +1,16 @@
+[package]
+name = "wlrs-server"
+version = "0.1.0"
+edition = "2021"
+default-run = "wlrs-server"
+
+
+[dependencies]
+tungstenite = { version = "0.21.0", features = ["native-tls"] }
+
+[build-dependencies]
+dotenv = { version = "0.15.0", default-features = false }
+
+[profile.release]
+codegen-units = 1
+lto = true
