@@ -6,10 +6,10 @@ default-run = "wlrs-server"
 
 
 [dependencies]
+wlrs = { path = ".." }
+wlrs-auth ={ path = "../wlrs-auth"}
 tungstenite = { version = "0.21.0", features = ["native-tls"] }
 
-[build-dependencies]
-dotenv = { version = "0.15.0", default-features = false }
 
 [profile.release]
 codegen-units = 1

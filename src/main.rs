@@ -1,88 +1,77 @@
 mod env;
+mod err;
 
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::thread::spawn;
-use tungstenite::handshake::HandshakeRole;
 use tungstenite::{accept, Message};
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+fn parse_request(data: Vec<u8>) -> err::Result<(String, Vec<u8>)> {
+    let mut iter = data.into_iter();
+    let init = iter
+        .next()
+        .ok_or(err::Error::from("Missing initial length"))? as usize;
 
-struct Error(String);
-
-impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Self(value.to_string())
+    let mut user = Vec::with_capacity(init);
+    for _ in 0..init {
+        user.push(
+            iter.next()
+                .ok_or(err::Error::from("Found unexpected element"))?,
+        )
     }
+    Ok((String::from_utf8(user)?, iter.collect()))
 }
 
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(value: std::string::FromUtf8Error) -> Self {
-        Self(value.to_string())
+fn handle_interaction(msg: Message) -> err::Result<usize> {
+    // user provided password
+    let (user, pass) = parse_request(msg.into_data())?;
+
+    // hash provided password
+    let hash = wlrs_auth::hash_password_from_salt(&pass, wlrs::WLRS_SERVER_PASS_SALT)?;
+
+    // compare hashes
+    if hash != wlrs::WLRS_SERVER_PASS_HASH {
+        return Ok(4); // IncorrectPassword
     }
-}
 
-impl From<tungstenite::Error> for Error {
-    fn from(value: tungstenite::Error) -> Self {
-        Self(value.to_string())
-    }
-}
-
-impl<T: HandshakeRole> From<tungstenite::HandshakeError<T>> for Error {
-    fn from(value: tungstenite::HandshakeError<T>) -> Self {
-        Self(value.to_string())
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self, f)
-    }
-}
-
-fn handle_stream(stream: TcpStream) -> Result<()> {
-    let mut ws = accept(stream)?;
-
-    let msg = ws.read()?;
-    let user = String::from_utf8(msg.into_data())?;
-
+    // interface `mcrcon` tool
     let stdout = Command::new("mcrcon")
         .args([
             "-p",
-            env::RCON_PASS,
-            format!("whitelist add {}", user).as_str(),
+            env::WLRS_RCON_PASS,
+            &format!("whitelist add {}", user),
         ])
         .output()?
         .stdout;
 
     let status = if stdout.is_empty() {
-        // "Minecraft server is down"
-        0
+        0 // ServerDown
     } else {
-        let res = String::from_utf8_lossy(stdout.as_slice());
+        let res = String::from_utf8(stdout)?;
 
         if res.starts_with("That player does not exist")
             || res.starts_with("Incorrect argument for command")
         {
-            1 // "Player doesn't exist"
+            1 // PlayerNotFound
         } else if res.starts_with("Player is already whitelisted") {
-            2 // "Already whitelisted"
+            2 // Whitelisted
         } else if res.starts_with("Added") {
-            3 // "Success"
+            3 // Success
         } else {
-            4 // "Invalid"
+            255 // Unexpected
         }
     };
-    ws.send(Message::Binary(vec![status])).map_err(Into::into)
+    Ok(status)
 }
 
-fn main() -> Result<()> {
+fn handle_stream(stream: TcpStream) -> err::Result<()> {
+    let mut ws = accept(stream)?;
+    let result = handle_interaction(ws.read()?).unwrap_or(255) as u8;
+    println!("{}", result);
+    ws.send(Message::Binary(vec![result])).map_err(Into::into)
+}
+
+fn main() -> err::Result<()> {
     let server = TcpListener::bind(env::WLRS_SERVER_ADDR)?;
 
     println!("Listening @ http://{}\n", server.local_addr()?);
