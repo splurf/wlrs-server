@@ -1,36 +1,42 @@
 mod env;
 mod err;
 
+use err::*;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::thread::spawn;
 use tungstenite::{accept, Message};
+use wlrs_auth::hash_password_from_b64;
 
-fn parse_request(data: Vec<u8>) -> err::Result<(String, Vec<u8>)> {
-    let mut iter = data.into_iter();
-    let init = iter
+fn parse_request(msg: Message) -> Result<(String, Vec<u8>)> {
+    let mut iter = msg.into_data().into_iter();
+
+    // length of username
+    let n = iter
         .next()
-        .ok_or(err::Error::from("Missing initial length"))? as usize;
+        .ok_or(Error::from(ErrorKind::MissingInitialLength))? as usize;
 
-    let mut user = Vec::with_capacity(init);
-    for _ in 0..init {
+    // take `n` numebr of bytes to retrieve the username
+    let mut user = String::with_capacity(n);
+    for _ in 0..n {
         user.push(
             iter.next()
-                .ok_or(err::Error::from("Found unexpected element"))?,
+                .ok_or(Error::from(ErrorKind::UnexpectedElement))? as char,
         )
     }
-    Ok((String::from_utf8(user)?, iter.collect()))
+    // the remaining bytes make up the password
+    Ok((user, iter.collect()))
 }
 
-fn handle_interaction(msg: Message) -> err::Result<usize> {
-    // user provided password
-    let (user, pass) = parse_request(msg.into_data())?;
+fn handle_request(msg: Message) -> Result<u8> {
+    // parse username and password from client message
+    let (user, pass) = parse_request(msg)?;
 
-    // hash provided password
-    let hash = wlrs_auth::hash_password_from_salt(&pass, wlrs::WLRS_SERVER_PASS_SALT)?;
+    // hash the provided password
+    let hashed = hash_password_from_b64(&pass, wlrs::SERVER_PASS_SALT).unwrap();
 
-    // compare hashes
-    if hash != wlrs::WLRS_SERVER_PASS_HASH {
+    // determine if correct password was provided
+    if hashed != wlrs::SERVER_PASS_HASH {
         return Ok(4); // IncorrectPassword
     }
 
@@ -38,8 +44,8 @@ fn handle_interaction(msg: Message) -> err::Result<usize> {
     let stdout = Command::new("mcrcon")
         .args([
             "-p",
-            env::WLRS_RCON_PASS,
-            &format!("whitelist add {}", user),
+            env::RCON_PASS,
+            format!("whitelist add {}", user).as_str(),
         ])
         .output()?
         .stdout;
@@ -58,21 +64,20 @@ fn handle_interaction(msg: Message) -> err::Result<usize> {
         } else if res.starts_with("Added") {
             3 // Success
         } else {
-            255 // Unexpected
+            u8::MAX // Unexpected
         }
     };
     Ok(status)
 }
 
-fn handle_stream(stream: TcpStream) -> err::Result<()> {
+fn handle_stream(stream: TcpStream) -> Result<()> {
     let mut ws = accept(stream)?;
-    let result = handle_interaction(ws.read()?).unwrap_or(255) as u8;
-    println!("{}", result);
-    ws.send(Message::Binary(vec![result])).map_err(Into::into)
+    let res = handle_request(ws.read()?).unwrap_or(u8::MAX);
+    ws.send(Message::Binary(vec![res])).map_err(Into::into)
 }
 
-fn main() -> err::Result<()> {
-    let server = TcpListener::bind(env::WLRS_SERVER_ADDR)?;
+fn main() -> Result<()> {
+    let server = TcpListener::bind(env::SERVER_ADDR)?;
 
     println!("Listening @ http://{}\n", server.local_addr()?);
 
