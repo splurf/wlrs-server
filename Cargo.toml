@@ -8,7 +8,9 @@ default-run = "wlrs-server"
 [dependencies]
 wlrs = { path = ".." }
 wlrs-auth = { path = "../wlrs-auth" }
+clap = { version = "4.5.4", features = ["std", "derive", "help", "color", "usage", "error-context"] }
 tungstenite = { version = "0.21.0", features = ["native-tls"] }
+
 
 [build-dependencies]
 dotenv = { version = "0.15.0", default-features = false }
