@@ -1,5 +1,4 @@
 use std::net::TcpStream;
-
 use tungstenite::{handshake::server::NoCallback, ServerHandshake};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -9,13 +8,12 @@ pub enum ErrorKind {
     UnexpectedElement,
 }
 
-impl ToString for ErrorKind {
-    fn to_string(&self) -> String {
-        match self {
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
             Self::MissingInitialLength => "Missing initial length specifier",
             Self::UnexpectedElement => "Unexpected element found",
-        }
-        .to_string()
+        })
     }
 }
 

@@ -53,10 +53,10 @@ fn handle_request(msg: Message) -> Result<u8> {
     let (user, pass) = parse_request(msg)?;
 
     // hash the provided password
-    let hashed = hash_password_from_b64(&pass, wlrs::SERVER_PASS_SALT).unwrap();
+    let hashed = hash_password_from_b64(&pass, env::SERVER_PASS_SALT).unwrap();
 
     // determine if correct password was provided
-    if hashed != wlrs::SERVER_PASS_HASH {
+    if hashed != env::SERVER_PASS_HASH {
         return Ok(4); // IncorrectPassword
     }
 
